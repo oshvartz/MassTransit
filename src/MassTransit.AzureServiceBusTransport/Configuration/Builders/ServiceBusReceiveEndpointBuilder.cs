@@ -1,4 +1,4 @@
-﻿// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
+﻿// Copyright 2007-2017 Chris Patterson, Dru Sellers, Travis Smith, et. al.
 //  
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use
 // this file except in compliance with the License. You may obtain a copy of the 
@@ -13,11 +13,12 @@
 namespace MassTransit.AzureServiceBusTransport.Builders
 {
     using System;
-    using System.Collections.Generic;
+    using System.Linq;
     using GreenPipes;
     using MassTransit.Builders;
-    using MassTransit.Pipeline;
-    using Settings;
+    using Specifications;
+    using Topology;
+    using Topology.Builders;
     using Transport;
     using Transports;
 
@@ -26,64 +27,55 @@ namespace MassTransit.AzureServiceBusTransport.Builders
         ReceiveEndpointBuilder,
         IReceiveEndpointBuilder
     {
-        readonly bool _subscribeMessageTopics;
         readonly IServiceBusHost _host;
-        readonly List<TopicSubscriptionSettings> _topicSubscriptions;
+        readonly bool _subscribeMessageTopics;
+        readonly IServiceBusEndpointConfiguration _configuration;
+        BusHostCollection<ServiceBusHost> _hosts;
 
-        public ServiceBusReceiveEndpointBuilder(IConsumePipe consumePipe, IBusBuilder busBuilder,
-            bool subscribeMessageTopics, IServiceBusHost host)
-            : base(consumePipe, busBuilder)
+        public ServiceBusReceiveEndpointBuilder(IBusBuilder busBuilder, IServiceBusHost host, BusHostCollection<ServiceBusHost> hosts, bool subscribeMessageTopics,
+            IServiceBusEndpointConfiguration configuration)
+            : base(busBuilder, configuration)
         {
             _subscribeMessageTopics = subscribeMessageTopics;
+            _configuration = configuration;
             _host = host;
-            _topicSubscriptions = new List<TopicSubscriptionSettings>();
+            _hosts = hosts;
         }
 
         public override ConnectHandle ConnectConsumePipe<T>(IPipe<ConsumeContext<T>> pipe)
         {
             if (_subscribeMessageTopics)
-                _topicSubscriptions.AddRange(_host.MessageNameFormatter.GetTopicSubscription(typeof(T)));
+            {
+                var subscriptionName = "{queuePath}";
+
+                var suffix = _host.Address.AbsolutePath.Split(new[] {'/'}, StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+                if (!string.IsNullOrWhiteSpace(suffix))
+                    subscriptionName += $"-{suffix}";
+
+                _configuration.ConsumeTopology
+                    .GetMessageTopology<T>()
+                    .Subscribe(subscriptionName);
+            }
 
             return base.ConnectConsumePipe(pipe);
         }
 
-        public ISendEndpointProvider CreateSendEndpointProvider(Uri sourceAddress, params ISendPipeSpecification[] specifications)
+        public IServiceBusReceiveEndpointTopology CreateReceiveEndpointTopology(Uri inputAddress, ReceiveSettings settings)
         {
-            var pipe = CreateSendPipe(specifications);
+            var topologyLayout = BuildTopology(settings);
 
-            var provider = new ServiceBusSendEndpointProvider(MessageSerializer, sourceAddress, SendTransportProvider, pipe);
-
-            return new SendEndpointCache(provider, QueueCacheDurationProvider);
+            return new ServiceBusReceiveEndpointTopology(_configuration, inputAddress, MessageSerializer, _host, _hosts, topologyLayout);
         }
 
-        public IPublishEndpointProvider CreatePublishEndpointProvider(Uri sourceAddress, params IPublishPipeSpecification[] specifications)
+        TopologyLayout BuildTopology(ReceiveSettings settings)
         {
-            var provider = new PublishSendEndpointProvider(MessageSerializer, sourceAddress, _host);
+            var topologyBuilder = new ReceiveEndpointConsumeTopologyBuilder();
 
-            var cache = new SendEndpointCache(provider, TopicCacheDurationProvider);
+            topologyBuilder.Queue = topologyBuilder.CreateQueue(settings.QueueDescription);
 
-            var pipe = CreatePublishPipe(specifications);
+            _configuration.ConsumeTopology.Apply(topologyBuilder);
 
-            return new ServiceBusPublishEndpointProvider(_host, cache, pipe);
-        }
-
-        TimeSpan QueueCacheDurationProvider(Uri address)
-        {
-            var timeSpan = address.GetQueueDescription().AutoDeleteOnIdle;
-
-            return timeSpan > TimeSpan.FromDays(1) ? TimeSpan.FromDays(1) : timeSpan;
-        }
-
-        TimeSpan TopicCacheDurationProvider(Uri address)
-        {
-            var timeSpan = address.GetTopicDescription().AutoDeleteOnIdle;
-
-            return timeSpan > TimeSpan.FromDays(1) ? TimeSpan.FromDays(1) : timeSpan;
-        }
-
-        public IEnumerable<TopicSubscriptionSettings> GetTopicSubscriptions()
-        {
-            return _topicSubscriptions;
+            return topologyBuilder.BuildTopologyLayout();
         }
     }
 }

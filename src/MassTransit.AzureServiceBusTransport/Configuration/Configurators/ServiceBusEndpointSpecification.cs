@@ -1,4 +1,4 @@
-// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
+// Copyright 2007-2017 Chris Patterson, Dru Sellers, Travis Smith, et. al.
 //  
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use
 // this file except in compliance with the License. You may obtain a copy of the 
@@ -14,14 +14,14 @@ namespace MassTransit.AzureServiceBusTransport.Configurators
 {
     using System;
     using System.Collections.Generic;
-    using System.Linq;
-    using EndpointConfigurators;
+    using EndpointSpecifications;
     using GreenPipes;
-    using GreenPipes.Specifications;
     using MassTransit.Builders;
     using MassTransit.Pipeline;
     using Pipeline;
     using Settings;
+    using Specifications;
+    using Topology;
     using Transport;
     using Transports;
 
@@ -35,11 +35,13 @@ namespace MassTransit.AzureServiceBusTransport.Configurators
         IPublishEndpointProvider _publishEndpointProvider;
         ISendEndpointProvider _sendEndpointProvider;
 
-        protected ServiceBusEndpointSpecification(IServiceBusHost host, BaseClientSettings settings, IConsumePipe consumePipe = null)
-            : base(consumePipe)
+        protected ServiceBusEndpointSpecification(IServiceBusHost host, BusHostCollection<ServiceBusHost> hosts,
+            BaseClientSettings settings, IServiceBusEndpointConfiguration configuration)
+            : base(configuration)
         {
             Host = host;
             _settings = settings;
+            Hosts = hosts;
         }
 
         public ISendEndpointProvider SendEndpointProvider => _sendEndpointProvider;
@@ -47,6 +49,8 @@ namespace MassTransit.AzureServiceBusTransport.Configurators
         public IPublishEndpointProvider PublishEndpointProvider => _publishEndpointProvider;
 
         public IServiceBusHost Host { get; }
+
+        protected BusHostCollection<ServiceBusHost> Hosts { get; }
 
         public override IEnumerable<ValidationResult> Validate()
         {
@@ -121,19 +125,23 @@ namespace MassTransit.AzureServiceBusTransport.Configurators
             _settings.SelectBasicTier();
         }
 
-        protected void ApplyReceiveEndpoint(IReceiveEndpointBuilder builder, IReceivePipe receivePipe, params IFilter<NamespaceContext>[] filters)
+        protected void ApplyReceiveEndpoint(IReceivePipe receivePipe, IServiceBusReceiveEndpointTopology receiveEndpointTopology,
+            Action<IPipeConfigurator<NamespaceContext>> configurePipe)
         {
-            _sendEndpointProvider = CreateSendEndpointProvider(builder);
-            _publishEndpointProvider = CreatePublishEndpointProvider(builder);
+            _sendEndpointProvider = receiveEndpointTopology.SendEndpointProvider;
+            _publishEndpointProvider = receiveEndpointTopology.PublishEndpointProvider;
 
-            IPipeSpecification<NamespaceContext>[] specifications = filters
-                .Concat(Enumerable.Repeat(_settings.RequiresSession
-                    ? (IFilter<NamespaceContext>)new MessageSessionReceiverFilter(receivePipe, _sendEndpointProvider, _publishEndpointProvider)
-                    : new MessageReceiverFilter(receivePipe, _sendEndpointProvider, _publishEndpointProvider), 1))
-                .Select(x => (IPipeSpecification<NamespaceContext>)new FilterPipeSpecification<NamespaceContext>(x))
-                .ToArray();
+            IPipe<NamespaceContext> pipe = Pipe.New<NamespaceContext>(x =>
+            {
+                configurePipe(x);
 
-            var transport = new ReceiveTransport(Host, _settings, _publishEndpointProvider, specifications);
+                if (_settings.RequiresSession)
+                    x.UseFilter(new MessageSessionReceiverFilter(receivePipe, receiveEndpointTopology));
+                else
+                    x.UseFilter(new MessageReceiverFilter(receivePipe, receiveEndpointTopology));
+            });
+
+            var transport = new ReceiveTransport(Host, _settings, _publishEndpointProvider, pipe);
 
             var serviceBusHost = Host as ServiceBusHost;
             if (serviceBusHost == null)

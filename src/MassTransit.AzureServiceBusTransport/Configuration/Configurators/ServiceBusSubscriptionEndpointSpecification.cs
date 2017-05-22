@@ -1,4 +1,4 @@
-// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
+// Copyright 2007-2017 Chris Patterson, Dru Sellers, Travis Smith, et. al.
 //  
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use
 // this file except in compliance with the License. You may obtain a copy of the 
@@ -16,10 +16,12 @@ namespace MassTransit.AzureServiceBusTransport.Configurators
     using Builders;
     using GreenPipes;
     using MassTransit.Builders;
-    using MassTransit.Pipeline;
     using Microsoft.ServiceBus.Messaging;
     using Pipeline;
     using Settings;
+    using Specifications;
+    using Transport;
+    using Transports;
 
 
     public class ServiceBusSubscriptionEndpointSpecification :
@@ -27,16 +29,19 @@ namespace MassTransit.AzureServiceBusTransport.Configurators
         IServiceBusSubscriptionEndpointConfigurator
     {
         readonly SubscriptionEndpointSettings _settings;
+        readonly IServiceBusEndpointConfiguration _configuration;
 
-        public ServiceBusSubscriptionEndpointSpecification(IServiceBusHost host, string subscriptionName, string topicName, IConsumePipe consumePipe = null)
-            : this(host, new SubscriptionEndpointSettings(topicName, subscriptionName), consumePipe)
+        public ServiceBusSubscriptionEndpointSpecification(IServiceBusHost host,BusHostCollection<ServiceBusHost> hosts, string subscriptionName, string topicName,
+            IServiceBusEndpointConfiguration configuration)
+            : this(host, hosts, new SubscriptionEndpointSettings(topicName, subscriptionName), configuration)
         {
         }
 
-        public ServiceBusSubscriptionEndpointSpecification(IServiceBusHost host, SubscriptionEndpointSettings settings, IConsumePipe consumePipe = null)
-            : base(host, settings, consumePipe)
+        public ServiceBusSubscriptionEndpointSpecification(IServiceBusHost host, BusHostCollection<ServiceBusHost> hosts, SubscriptionEndpointSettings settings, IServiceBusEndpointConfiguration configuration)
+            : base(host, hosts, settings, configuration)
         {
             _settings = settings;
+            _configuration = configuration;
         }
 
         public override IEnumerable<ValidationResult> Validate()
@@ -47,14 +52,19 @@ namespace MassTransit.AzureServiceBusTransport.Configurators
 
         public override void Apply(IBusBuilder builder)
         {
-            var receiveEndpointBuilder = new ServiceBusReceiveEndpointBuilder(CreateConsumePipe(builder), builder, false, Host);
+            var receiveEndpointBuilder = new ServiceBusSubscriptionEndpointBuilder(builder, Host, Hosts, _configuration);
 
             var receivePipe = CreateReceivePipe(receiveEndpointBuilder);
 
-            ApplyReceiveEndpoint(receiveEndpointBuilder, receivePipe,
-                new PrepareSubscriptionEndpointFilter(_settings),
-                new PrepareSubscriptionClientFilter(_settings));
+            var receiveEndpointTopology = receiveEndpointBuilder.CreateReceiveEndpointTopology(InputAddress, _settings);
+
+            ApplyReceiveEndpoint(receivePipe, receiveEndpointTopology, x =>
+            {
+                x.UseFilter(new ConfigureTopologyFilter<SubscriptionSettings>(_settings, receiveEndpointTopology.TopologyLayout, false));
+                x.UseFilter(new PrepareSubscriptionClientFilter(_settings));
+            });
         }
+
 
         protected override ReceiveEndpointSettings GetReceiveEndpointSettings(string queueName)
         {

@@ -78,6 +78,11 @@ namespace MassTransit.AzureServiceBusTransport.Pipeline
             {
                 var delay = _delay;
 
+                if (LockWouldExpireBeforeRenewal())
+                {
+                    delay = TimeSpan.Zero;
+                }
+
                 while (_source.Token.IsCancellationRequested == false)
                 {
                     try
@@ -123,6 +128,13 @@ namespace MassTransit.AzureServiceBusTransport.Pipeline
                     catch (OperationCanceledException)
                     {
                     }
+                    catch (TimeoutException exception)
+                    {
+                        delay = TimeSpan.Zero;
+
+                        if (_log.IsWarnEnabled)
+                            _log.Warn($"Renew Lock Timeout (will retry): {_context.MessageId}", exception);
+                    }
                     catch (Exception exception)
                     {
                         _source.Cancel();
@@ -134,6 +146,11 @@ namespace MassTransit.AzureServiceBusTransport.Pipeline
                 }
 
                 _completed.TrySetResult(true);
+            }
+
+            bool LockWouldExpireBeforeRenewal()
+            {
+                return DateTime.UtcNow + _delay >= _context.LockedUntil;
             }
 
             public Task Complete()

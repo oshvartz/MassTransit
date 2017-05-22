@@ -42,7 +42,7 @@ namespace Automatonymous.Requests
         RequestSettings Request<TInstance, TRequest, TResponse>.Settings => _settings;
         public Event<TResponse> Completed { get; set; }
         public Event<Fault<TRequest>> Faulted { get; set; }
-        public Event<RequestTimeoutExpired> TimeoutExpired { get; set; }
+        public Event<RequestTimeoutExpired<TRequest>> TimeoutExpired { get; set; }
         public State Pending { get; set; }
 
         public void SetRequestId(TInstance instance, Guid? requestId)
@@ -59,6 +59,20 @@ namespace Automatonymous.Requests
                 throw new ArgumentNullException(nameof(instance));
 
             return _requestIdProperty.Get(instance);
+        }
+
+        public bool EventFilter(EventContext<TInstance, RequestTimeoutExpired<TRequest>> context)
+        {
+            ConsumeContext<RequestTimeoutExpired<TRequest>> consumeContext;
+            if (!context.TryGetPayload(out consumeContext))
+                return false;
+
+            if (!consumeContext.RequestId.HasValue)
+                return false;
+
+            var requestId = _requestIdProperty.Get(context.Instance);
+
+            return requestId.HasValue && requestId.Value == consumeContext.RequestId.Value;
         }
     }
 }

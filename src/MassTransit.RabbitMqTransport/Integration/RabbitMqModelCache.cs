@@ -1,4 +1,4 @@
-// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
+// Copyright 2007-2017 Chris Patterson, Dru Sellers, Travis Smith, et. al.
 //  
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use
 // this file except in compliance with the License. You may obtain a copy of the 
@@ -19,6 +19,8 @@ namespace MassTransit.RabbitMqTransport.Integration
     using GreenPipes;
     using Logging;
     using RabbitMQ.Client;
+    using Specifications;
+    using Topology;
     using Util;
 
 
@@ -33,12 +35,14 @@ namespace MassTransit.RabbitMqTransport.Integration
         readonly ITaskScope _cacheTaskScope;
 
         readonly IRabbitMqHost _host;
+        readonly IRabbitMqTopology _topology;
         readonly object _scopeLock = new object();
         ModelScope _scope;
 
-        public RabbitMqModelCache(IRabbitMqHost host)
+        public RabbitMqModelCache(IRabbitMqHost host, IRabbitMqTopology topology)
         {
             _host = host;
+            _topology = topology;
 
             _cacheTaskScope = host.Supervisor.CreateScope($"{TypeMetadataCache<RabbitMqModelCache>.ShortName}", CloseScope);
         }
@@ -51,7 +55,7 @@ namespace MassTransit.RabbitMqTransport.Integration
             lock (_scopeLock)
             {
                 existingScope = _scope;
-                if (existingScope == null)
+                if (existingScope == null || existingScope.IsShuttingDown)
                 {
                     newScope = new ModelScope(_cacheTaskScope);
                     _scope = newScope;
@@ -98,7 +102,7 @@ namespace MassTransit.RabbitMqTransport.Integration
 
                     model.ModelShutdown += modelShutdown;
 
-                    var modelContext = new RabbitMqModelContext(connectionContext, model, _cacheTaskScope, _host);
+                    var modelContext = new RabbitMqModelContext(connectionContext, model, _cacheTaskScope, _host, _topology);
 
                     scope.Created(modelContext);
                 }
@@ -168,6 +172,8 @@ namespace MassTransit.RabbitMqTransport.Integration
 
                 _taskScope = supervisor.CreateScope("ModelScope", CloseContext);
             }
+
+            public bool IsShuttingDown => _taskScope.StoppingToken.IsCancellationRequested;
 
             public void Created(RabbitMqModelContext connectionContext)
             {

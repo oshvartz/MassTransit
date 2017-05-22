@@ -1,9 +1,10 @@
 # Summary
 
 ## Overview
-* [Undestanding MassTransit](understand/README.md)
+* [Understanding MassTransit](understand/README.md)
     * [Key terminology](understand/key-ideas.md)
     * [Under the hood](understand/under-the-hood.md)
+        * [Topology](understand/default-topology.md)
     * [What we add to the transport](understand/additions-to-transport.md)
     * [Publishing messages](understand/publishing.md)
     * [Sending messages](understand/sending.md)
@@ -46,11 +47,17 @@
     * [Schedule messages](usage/scheduling/README.md)
         * [Scheduling API](usage/scheduling/scheduling-api.md)
         * [In-memory scheduling](usage/scheduling/in-memory.md)
-        * [Redelivering messages](usage/scheduling/redeliver.md)
         * [Azure Service Bus](usage/scheduling/azure-sb-scheduler.md)
+        * [RabbitMQ Delayed Exchange](usage/scheduling/rabbitmq-delayed.md)
+        * [Redelivering messages](usage/scheduling/redeliver.md)
     * [Observe messages](usage/observers.md)
     * [Observe lifecycle](usage/lifecycle-observers.md)
     * [Connect endpoints](usage/connect-endpoint.md)
+    * [Logging](usage/logging.md)
+    * [Testing](usage/testing/README.md)
+        * [Bus harness](usage/testing/bus-harness.md)
+        * [Testing consumers](usage/testing/testing-consumers.md)
+        * [Testing sagas](usage/testing/testing-sagas.md)
 
 ## Advanced 
 * [Sagas](advanced/sagas/README.md)
@@ -67,6 +74,7 @@
     * [Rate limiter](advanced/middleware/rate-limiter.md)
     * [Latest](advanced/middleware/latest.md)
     * [Custom](advanced/middleware/custom.md)
+* [Audit](advanced/audit/README.md)
 * [Turnout](advanced/turnout/README.md)
 * [Versioning](advanced/versioning.md)
 * [Transactions](advanced/transactions.md)
@@ -76,3 +84,7 @@
 * [Troubleshooting](troubleshooting/README.md)
     * [Common gotchas](troubleshooting/common-gotchas.md)
     * [Diagnostics](troubleshooting/show-config.md)
+
+## Architecture
+* [Articles](architecture/README.md)
+    * [Green Cache](architecture/green-cache.md)

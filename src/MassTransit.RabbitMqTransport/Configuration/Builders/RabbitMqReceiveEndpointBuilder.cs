@@ -1,4 +1,4 @@
-﻿// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
+﻿// Copyright 2007-2017 Chris Patterson, Dru Sellers, Travis Smith, et. al.
 //  
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use
 // this file except in compliance with the License. You may obtain a copy of the 
@@ -13,11 +13,11 @@
 namespace MassTransit.RabbitMqTransport.Builders
 {
     using System;
-    using System.Collections.Generic;
     using GreenPipes;
     using MassTransit.Builders;
-    using MassTransit.Pipeline;
+    using Specifications;
     using Topology;
+    using Topology.Builders;
     using Transport;
     using Transports;
 
@@ -27,58 +27,53 @@ namespace MassTransit.RabbitMqTransport.Builders
         IRabbitMqReceiveEndpointBuilder
     {
         readonly bool _bindMessageExchanges;
-        readonly List<ExchangeBindingSettings> _exchangeBindings;
         readonly IRabbitMqHost _host;
+        readonly BusHostCollection<RabbitMqHost> _hosts;
+        readonly IRabbitMqEndpointConfiguration _configuration;
 
-        public RabbitMqReceiveEndpointBuilder(IConsumePipe consumePipe, IBusBuilder busBuilder, bool bindMessageExchanges, IRabbitMqHost host)
-            : base(consumePipe, busBuilder)
+        public RabbitMqReceiveEndpointBuilder(IBusBuilder busBuilder, IRabbitMqHost host, BusHostCollection<RabbitMqHost> hosts, bool bindMessageExchanges,
+            IRabbitMqEndpointConfiguration configuration)
+            : base(busBuilder, configuration)
         {
             _bindMessageExchanges = bindMessageExchanges;
+            _configuration = configuration;
             _host = host;
-
-            _exchangeBindings = new List<ExchangeBindingSettings>();
+            _hosts = hosts;
         }
 
         public override ConnectHandle ConnectConsumePipe<T>(IPipe<ConsumeContext<T>> pipe)
         {
             if (_bindMessageExchanges)
-                _exchangeBindings.AddRange(typeof(T).GetExchangeBindings(_host.Settings.MessageNameFormatter));
+            {
+                _configuration.ConsumeTopology
+                    .GetMessageTopology<T>()
+                    .Bind();
+            }
 
             return base.ConnectConsumePipe(pipe);
         }
 
-        public void AddExchangeBindings(params ExchangeBindingSettings[] bindings)
+        public IRabbitMqReceiveEndpointTopology CreateReceiveEndpointTopology(Uri inputAddress, ReceiveSettings settings)
         {
-            _exchangeBindings.AddRange(bindings);
+            var topologyLayout = BuildTopology(settings);
+
+            return new RabbitMqReceiveEndpointTopology(_configuration, inputAddress, MessageSerializer, _host, _hosts, topologyLayout);
         }
 
-        public ISendEndpointProvider CreateSendEndpointProvider(Uri sourceAddress, params ISendPipeSpecification[] specifications)
+        TopologyLayout BuildTopology(ReceiveSettings settings)
         {
-            var pipe = CreateSendPipe(specifications);
+            var topologyBuilder = new ReceiveEndpointConsumeTopologyBuilder();
 
-            var provider = new RabbitMqSendEndpointProvider(MessageSerializer, sourceAddress, SendTransportProvider, pipe);
+            topologyBuilder.Queue = topologyBuilder.QueueDeclare(settings.QueueName, settings.Durable, settings.AutoDelete, settings.Exclusive, settings.QueueArguments);
 
-            return new SendEndpointCache(provider, CacheDurationProvider);
-        }
+            topologyBuilder.Exchange = topologyBuilder.ExchangeDeclare(settings.ExchangeName ?? settings.QueueName, settings.ExchangeType, settings.Durable, settings.AutoDelete,
+                settings.ExchangeArguments);
 
-        public IPublishEndpointProvider CreatePublishEndpointProvider(Uri sourceAddress, params IPublishPipeSpecification[] specifications)
-        {
-            var pipe = CreatePublishPipe(specifications);
+            topologyBuilder.QueueBind(topologyBuilder.Exchange, topologyBuilder.Queue, settings.RoutingKey, settings.BindingArguments);
 
-            return new RabbitMqPublishEndpointProvider(_host, MessageSerializer, sourceAddress, pipe);
-        }
+            _configuration.ConsumeTopology.Apply(topologyBuilder);
 
-        public TimeSpan CacheDurationProvider(Uri address)
-        {
-            if (address.GetReceiveSettings().AutoDelete)
-                return TimeSpan.FromMinutes(1);
-
-            return TimeSpan.FromDays(1);
-        }
-
-        public IEnumerable<ExchangeBindingSettings> GetExchangeBindings()
-        {
-            return _exchangeBindings;
+            return topologyBuilder.BuildTopologyLayout();
         }
     }
 }

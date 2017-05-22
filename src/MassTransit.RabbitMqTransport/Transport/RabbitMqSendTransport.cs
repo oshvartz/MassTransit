@@ -1,4 +1,4 @@
-﻿// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
+﻿// Copyright 2007-2017 Chris Patterson, Dru Sellers, Travis Smith, et. al.
 //  
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use
 // this file except in compliance with the License. You may obtain a copy of the 
@@ -25,32 +25,29 @@ namespace MassTransit.RabbitMqTransport.Transport
     using GreenPipes;
     using Integration;
     using Logging;
-    using MassTransit.Pipeline;
     using MassTransit.Pipeline.Observables;
-    using Pipeline;
     using RabbitMQ.Client;
     using Serialization;
-    using Topology;
     using Transports;
-    using Util;
 
 
     public class RabbitMqSendTransport :
         ISendTransport
     {
         static readonly ILog _log = Logger.Get<RabbitMqSendTransport>();
-        readonly PrepareSendExchangeFilter _filter;
+
+        readonly IFilter<ModelContext> _filter;
         readonly IModelCache _modelCache;
         readonly SendObservable _observers;
-        readonly SendSettings _sendSettings;
+        readonly string _exchange;
 
-        public RabbitMqSendTransport(IModelCache modelCache, SendSettings sendSettings, params ExchangeBindingSettings[] exchangeBindings)
+        public RabbitMqSendTransport(IModelCache modelCache, IFilter<ModelContext> preSendFilter, string exchange)
         {
             _observers = new SendObservable();
-            _sendSettings = sendSettings;
             _modelCache = modelCache;
 
-            _filter = new PrepareSendExchangeFilter(_sendSettings, exchangeBindings);
+            _filter = preSendFilter;
+            _exchange = exchange;
         }
 
         async Task ISendTransport.Send<T>(T message, IPipe<SendContext<T>> pipe, CancellationToken cancelSend)
@@ -63,7 +60,7 @@ namespace MassTransit.RabbitMqTransport.Transport
                 {
                     var properties = modelContext.Model.CreateBasicProperties();
 
-                    var context = new RabbitMqSendContextImpl<T>(properties, message, _sendSettings, cancelSend);
+                    var context = new BasicPublishRabbitMqSendContext<T>(properties, _exchange, message, cancelSend);
 
                     try
                     {
@@ -138,17 +135,21 @@ namespace MassTransit.RabbitMqTransport.Transport
                     try
                     {
                         IBasicProperties properties;
+                        string routingKey = "";
 
                         RabbitMqBasicConsumeContext basicConsumeContext;
                         if (context.TryGetPayload(out basicConsumeContext))
+                        {
                             properties = basicConsumeContext.Properties;
+                            routingKey = basicConsumeContext.RoutingKey;
+                        }
                         else
                         {
                             properties = modelContext.Model.CreateBasicProperties();
                             properties.Headers = new Dictionary<string, object>();
                         }
 
-                        var moveContext = new RabbitMqMoveContext(context, properties);
+                        var moveContext = new RabbitMqMoveContext(context, properties, _exchange, routingKey ?? "");
 
                         await pipe.Send(moveContext).ConfigureAwait(false);
 
@@ -163,13 +164,13 @@ namespace MassTransit.RabbitMqTransport.Transport
                             body = memoryStream.ToArray();
                         }
 
-                        var task = modelContext.BasicPublishAsync(_sendSettings.ExchangeName, "", true, properties, body, true);
+                        var task = modelContext.BasicPublishAsync(_exchange, "", true, properties, body, true);
                         context.AddPendingTask(task);
                     }
                     catch (Exception ex)
                     {
                         if (_log.IsErrorEnabled)
-                            _log.Error("Faulted moving message to error queue: " + _sendSettings.ExchangeName, ex);
+                            _log.Error("Faulted moving message to error queue: " + _exchange, ex);
 
                         throw;
                     }
@@ -196,10 +197,12 @@ namespace MassTransit.RabbitMqTransport.Transport
             readonly ReceiveContext _context;
             IMessageSerializer _serializer;
 
-            public RabbitMqMoveContext(ReceiveContext context, IBasicProperties properties)
+            public RabbitMqMoveContext(ReceiveContext context, IBasicProperties properties, string exchange, string routingKey)
             {
                 _context = context;
                 BasicProperties = properties;
+                Exchange = exchange;
+                RoutingKey = routingKey;
                 AwaitAck = true;
                 Headers = new RabbitMqSendHeaders(properties);
                 _serializer = new CopyBodySerializer(context);

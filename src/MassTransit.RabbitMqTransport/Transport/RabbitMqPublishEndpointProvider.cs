@@ -1,4 +1,4 @@
-// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
+// Copyright 2007-2017 Chris Patterson, Dru Sellers, Travis Smith, et. al.
 //  
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use
 // this file except in compliance with the License. You may obtain a copy of the 
@@ -13,48 +13,45 @@
 namespace MassTransit.RabbitMqTransport.Transport
 {
     using System;
-    using System.Linq;
-    using System.Threading;
     using System.Threading.Tasks;
     using GreenPipes;
     using Integration;
     using MassTransit.Pipeline;
     using MassTransit.Pipeline.Observables;
     using MassTransit.Pipeline.Pipes;
+    using Pipeline;
+    using Specifications;
     using Topology;
+    using Topology.Builders;
     using Transports;
     using Util;
     using Util.Caching;
 
 
     public class RabbitMqPublishEndpointProvider :
-        IPublishEndpointProvider,
-        IDisposable
+        IPublishEndpointProvider
     {
-        readonly LazyMemoryCache<Type, ISendEndpoint> _cache;
         readonly IRabbitMqHost _host;
+        readonly IIndex<TypeKey, CachedSendEndpoint<TypeKey>> _index;
         readonly PublishObservable _publishObservable;
         readonly IPublishPipe _publishPipe;
+        readonly IRabbitMqTopology _topology;
         readonly IMessageSerializer _serializer;
         readonly Uri _sourceAddress;
 
-        public RabbitMqPublishEndpointProvider(IRabbitMqHost host, IMessageSerializer serializer, Uri sourceAddress, IPublishPipe publishPipe)
+        public RabbitMqPublishEndpointProvider(IRabbitMqHost host, IMessageSerializer serializer, Uri sourceAddress, IPublishPipe publishPipe,
+            IRabbitMqTopology topology)
         {
             _host = host;
             _serializer = serializer;
             _sourceAddress = sourceAddress;
             _publishPipe = publishPipe;
+            _topology = topology;
 
             _publishObservable = new PublishObservable();
 
-            var cacheId = NewId.NextGuid().ToString();
-            _cache = new LazyMemoryCache<Type, ISendEndpoint>(cacheId, CreateSendEndpoint, GetEndpointCachePolicy, FormatAddressKey,
-                OnCachedEndpointRemoved);
-        }
-
-        public void Dispose()
-        {
-            _cache.Dispose();
+            var cache = new GreenCache<CachedSendEndpoint<TypeKey>>(10000, TimeSpan.FromMinutes(1), TimeSpan.FromHours(24), () => DateTime.UtcNow);
+            _index = cache.AddIndex("type", x => x.Key);
         }
 
         public IPublishEndpoint CreatePublishEndpoint(Uri sourceAddress, Guid? correlationId, Guid? conversationId)
@@ -62,13 +59,16 @@ namespace MassTransit.RabbitMqTransport.Transport
             return new PublishEndpoint(sourceAddress, this, _publishObservable, _publishPipe, correlationId, conversationId);
         }
 
-        public async Task<ISendEndpoint> GetPublishSendEndpoint(Type messageType)
+        public async Task<ISendEndpoint> GetPublishSendEndpoint<T>(T message)
+            where T : class
         {
-            Cached<ISendEndpoint> cached = await _cache.Get(messageType).ConfigureAwait(false);
+            IRabbitMqMessagePublishTopologyConfigurator<T> messageTopology = _topology.PublishTopology.GetMessageTopology<T>();
 
-            var endpoint = await cached.Value.ConfigureAwait(false);
+            Uri publishAddress;
+            if (!messageTopology.TryGetPublishAddress(_host.Address, message, out publishAddress))
+                throw new PublishException($"An address for publishing message type {TypeMetadataCache<T>.ShortName} was not found.");
 
-            return new CachedSendEndpoint(endpoint, cached.Touch);
+            return await _index.Get(new TypeKey(typeof(T), publishAddress), typeKey => CreateSendEndpoint<T>(typeKey)).ConfigureAwait(false);
         }
 
         public ConnectHandle ConnectPublishObserver(IPublishObserver observer)
@@ -76,118 +76,57 @@ namespace MassTransit.RabbitMqTransport.Transport
             return _publishObservable.Connect(observer);
         }
 
-        Task OnCachedEndpointRemoved(string key, ISendEndpoint value, string reason)
+        Task<CachedSendEndpoint<TypeKey>> CreateSendEndpoint<T>(TypeKey typeKey)
+            where T : class
         {
-            return TaskUtil.Completed;
-        }
+            IRabbitMqMessagePublishTopologyConfigurator<T> messageTopology = _topology.PublishTopology.GetMessageTopology<T>();
 
-        string FormatAddressKey(Type key)
-        {
-            return TypeMetadataCache.GetShortName(key);
-        }
+            var sendSettings = messageTopology.GetSendSettings();
 
-        LazyMemoryCache<Type, ISendEndpoint>.ICacheExpiration GetEndpointCachePolicy(LazyMemoryCache<Type, ISendEndpoint>.ICacheExpirationSelector selector)
-        {
-            return selector.SlidingWindow(TimeSpan.FromDays(1));
-        }
+            var builder = new PublishEndpointTopologyBuilder();
+            messageTopology.ApplyMessageTopology(builder);
 
-        Task<ISendEndpoint> CreateSendEndpoint(Type messageType)
-        {
-            if (!TypeMetadataCache.IsValidMessageType(messageType))
-                throw new MessageException(messageType, "Anonymous types are not valid message types");
+            var topology = builder.BuildTopologyLayout();
 
-            var sendSettings = _host.Settings.GetSendSettings(messageType);
+            var modelCache = new RabbitMqModelCache(_host, _topology);
 
-            ExchangeBindingSettings[] bindings = TypeMetadataCache.GetMessageTypes(messageType)
-                .SelectMany(type => type.GetExchangeBindings(_host.Settings.MessageNameFormatter))
-                .Where(binding => !sendSettings.ExchangeName.Equals(binding.Exchange.ExchangeName))
-                .ToArray();
+            var sendTransport = new RabbitMqSendTransport(modelCache, new ConfigureTopologyFilter<SendSettings>(sendSettings, topology), sendSettings.ExchangeName);
 
-            var destinationAddress = sendSettings.GetSendAddress(_host.Settings.HostAddress);
+            var sendEndpoint = new SendEndpoint(sendTransport, _serializer, typeKey.Address, _sourceAddress, SendPipe.Empty);
 
-            var modelCache = new RabbitMqModelCache(_host);
-
-            var sendTransport = new RabbitMqSendTransport(modelCache, sendSettings, bindings);
-
-            return Task.FromResult<ISendEndpoint>(new SendEndpoint(sendTransport, _serializer, destinationAddress, _sourceAddress, SendPipe.Empty));
+            return Task.FromResult(new CachedSendEndpoint<TypeKey>(typeKey, sendEndpoint));
         }
 
 
-        class CachedSendEndpoint :
-            ISendEndpoint
+        struct TypeKey
         {
-            readonly ISendEndpoint _endpoint;
-            readonly Action _touch;
+            public readonly Type MessageType;
+            public readonly Uri Address;
 
-            public CachedSendEndpoint(ISendEndpoint endpoint, Action touch)
+            public TypeKey(Type messageType, Uri address)
             {
-                _endpoint = endpoint;
-                _touch = touch;
+                MessageType = messageType;
+                Address = address;
             }
 
-            public ConnectHandle ConnectSendObserver(ISendObserver observer)
+            public bool Equals(TypeKey other)
             {
-                return _endpoint.ConnectSendObserver(observer);
+                return MessageType == other.MessageType && Address.Equals(other.Address);
             }
 
-            public Task Send<T>(T message, CancellationToken cancellationToken = new CancellationToken()) where T : class
+            public override bool Equals(object obj)
             {
-                _touch();
-                return _endpoint.Send(message, cancellationToken);
+                if (ReferenceEquals(null, obj))
+                    return false;
+                return obj is TypeKey && Equals((TypeKey)obj);
             }
 
-            public Task Send<T>(T message, IPipe<SendContext<T>> pipe, CancellationToken cancellationToken = new CancellationToken()) where T : class
+            public override int GetHashCode()
             {
-                _touch();
-                return _endpoint.Send(message, pipe, cancellationToken);
-            }
-
-            public Task Send<T>(T message, IPipe<SendContext> pipe, CancellationToken cancellationToken = new CancellationToken()) where T : class
-            {
-                _touch();
-                return _endpoint.Send(message, pipe, cancellationToken);
-            }
-
-            public Task Send(object message, CancellationToken cancellationToken = new CancellationToken())
-            {
-                _touch();
-                return _endpoint.Send(message, cancellationToken);
-            }
-
-            public Task Send(object message, Type messageType, CancellationToken cancellationToken = new CancellationToken())
-            {
-                _touch();
-                return _endpoint.Send(message, messageType, cancellationToken);
-            }
-
-            public Task Send(object message, IPipe<SendContext> pipe, CancellationToken cancellationToken = new CancellationToken())
-            {
-                _touch();
-                return _endpoint.Send(message, pipe, cancellationToken);
-            }
-
-            public Task Send(object message, Type messageType, IPipe<SendContext> pipe, CancellationToken cancellationToken = new CancellationToken())
-            {
-                _touch();
-                return _endpoint.Send(message, messageType, pipe, cancellationToken);
-            }
-
-            public Task Send<T>(object values, CancellationToken cancellationToken = new CancellationToken()) where T : class
-            {
-                _touch();
-                return _endpoint.Send<T>(values, cancellationToken);
-            }
-
-            public Task Send<T>(object values, IPipe<SendContext<T>> pipe, CancellationToken cancellationToken = new CancellationToken()) where T : class
-            {
-                _touch();
-                return _endpoint.Send(values, pipe, cancellationToken);
-            }
-
-            public Task Send<T>(object values, IPipe<SendContext> pipe, CancellationToken cancellationToken = new CancellationToken()) where T : class
-            {
-                _touch();
-                return _endpoint.Send<T>(values, pipe, cancellationToken);
+                unchecked
+                {
+                    return (MessageType.GetHashCode() * 397) ^ Address.GetHashCode();
+                }
             }
         }
     }

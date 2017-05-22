@@ -12,13 +12,16 @@ MassTransit is Apache 2.0 licensed.
 
 ## Getting started with MassTransit
 
-In order to get started with MassTransit, you can have a look at the documentation, which is located at [http://docs.masstransit-project.com/](http://docs.masstransit-project.com/).
+In order to get started with MassTransit, you can have a look at the
+documentation, which is located at [http://masstransit-project.com/MassTransit](http://masstransit-project.com/MassTransit).
 
 ### Simplest possible thing:
 
-`install-package MassTransit.RabbitMq` then;
+`install-package MassTransit.RabbitMq`
 
-```
+and then:
+
+```csharp
 // Message Definition
 class MyMessage
 {
@@ -62,7 +65,7 @@ You need to add the management interface before you can login. First, from an el
 
 Next, run the following command to enable the rabbitmq management plugin:
 
-	rabbitmq-plugins.bat enable rabbitmq_management 
+`rabbitmq-plugins.bat enable rabbitmq_management`
 
 ### Downloads
 
@@ -83,6 +86,17 @@ We support RabbitMQ and Azure Service Bus message brokers.
 While attendence is pretty light, there is a Gitter chat room available:
 
 [![Join the chat at https://gitter.im/MassTransit/MassTransit](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/MassTransit/MassTransit?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
+## GitHub Issues
+
+**Pay attention**
+
+Please do not open an issue on github, unless you have spotted an actual bug in MassTransit. 
+If you are unsure, ask on the mailing list, and if we confirm it's a bug, we'll ask you to create the issue. 
+Issues are not the place for questions, and they'll likely be closed.
+
+This policy is in place to avoid bugs being drowned out in a pile of sensible suggestions for future 
+enhancements and calls for help from people who forget to check back if they get it and so on.
 
 ## Building from Source
 

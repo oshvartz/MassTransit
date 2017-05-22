@@ -16,6 +16,7 @@ namespace MassTransit.AzureServiceBusTransport.Transport
     using System.Threading.Tasks;
     using Contexts;
     using Logging;
+    using MassTransit.Topology;
     using Microsoft.ServiceBus.Messaging;
     using Transports.Metrics;
     using Util;
@@ -30,19 +31,17 @@ namespace MassTransit.AzureServiceBusTransport.Transport
         readonly MessageSession _session;
         readonly ITaskSupervisor _supervisor;
         readonly IDeliveryTracker _tracker;
-        readonly IPublishEndpointProvider _publishEndpointProvider;
-        readonly ISendEndpointProvider _sendEndpointProvider;
+        readonly IReceiveEndpointTopology _topology;
 
         public MessageSessionAsyncHandler(NamespaceContext context, ITaskSupervisor supervisor, ISessionReceiver receiver, MessageSession session,
-            IDeliveryTracker tracker, ISendEndpointProvider sendEndpointProvider, IPublishEndpointProvider publishEndpointProvider)
+            IDeliveryTracker tracker, IReceiveEndpointTopology topology)
         {
             _context = context;
             _supervisor = supervisor;
             _receiver = receiver;
             _session = session;
             _tracker = tracker;
-            _sendEndpointProvider = sendEndpointProvider;
-            _publishEndpointProvider = publishEndpointProvider;
+            _topology = topology;
         }
 
         async Task IMessageSessionAsyncHandler.OnMessageAsync(MessageSession session, BrokeredMessage message)
@@ -58,7 +57,7 @@ namespace MassTransit.AzureServiceBusTransport.Transport
                 if (_log.IsDebugEnabled)
                     _log.DebugFormat("Receiving {0}:{1}({3}) - {2}", delivery.Id, message.MessageId, _receiver.QueuePath, session.SessionId);
 
-                var context = new ServiceBusReceiveContext(_receiver.InputAddress, message, _context, _sendEndpointProvider, _publishEndpointProvider);
+                var context = new ServiceBusReceiveContext(_receiver.InputAddress, message, _context, _topology);
 
                 context.GetOrAddPayload<MessageSessionContext>(() => new BrokeredMessageSessionContext(session));
                 context.GetOrAddPayload(() => _context);
@@ -66,6 +65,12 @@ namespace MassTransit.AzureServiceBusTransport.Transport
                 try
                 {
                     await _context.PreReceive(context).ConfigureAwait(false);
+
+                    if (message.LockedUntilUtc <= DateTime.UtcNow)
+                        throw new MessageLockExpiredException(_receiver.InputAddress, $"The message lock expired: {message.MessageId}");
+
+                    if (message.ExpiresAtUtc < DateTime.UtcNow)
+                        throw new MessageTimeToLiveExpiredException(_receiver.InputAddress, $"The message TTL expired: {message.MessageId}");
 
                     await _receiver.ReceivePipe.Send(context).ConfigureAwait(false);
 
@@ -83,7 +88,8 @@ namespace MassTransit.AzureServiceBusTransport.Transport
                     if (_log.IsErrorEnabled)
                         _log.Error($"Received faulted: {message.MessageId}", ex);
 
-                    await message.AbandonAsync().ConfigureAwait(false);
+                    await AbandonMessage(message).ConfigureAwait(false);
+
                     await _context.ReceiveFault(context, ex).ConfigureAwait(false);
                 }
                 finally
@@ -92,6 +98,20 @@ namespace MassTransit.AzureServiceBusTransport.Transport
                 }
             }
         }
+
+        static async Task AbandonMessage(BrokeredMessage message)
+        {
+            try
+            {
+                await message.AbandonAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                if (_log.IsWarnEnabled)
+                    _log.Warn($"Abandon message faulted: {message.MessageId}", exception);
+            }
+        }
+
 
         public Task OnCloseSessionAsync(MessageSession session)
         {

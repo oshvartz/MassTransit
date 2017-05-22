@@ -13,9 +13,12 @@ let packagesPath = FullName "./src/packages"
 let keyFile = FullName "./MassTransit.snk"
 
 let assemblyVersion = "3.5.0.0"
-let baseVersion = "3.5.5"
+let baseVersion = "3.6.0"
 
-let semVersion : SemVerInfo = parse baseVersion
+let envVersion = (environVarOrDefault "APPVEYOR_BUILD_VERSION" (baseVersion + ".0"))
+let buildVersion = (envVersion.Substring(0, envVersion.LastIndexOf('.')))
+
+let semVersion : SemVerInfo = (parse buildVersion)
 
 let Version = semVersion.ToString()
 
