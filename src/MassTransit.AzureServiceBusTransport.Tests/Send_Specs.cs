@@ -91,7 +91,7 @@ namespace MassTransit.AzureServiceBusTransport.Tests
         [OneTimeSetUp]
         public async Task Setup()
         {
-            _requestClient = await Host.CreateRequestClient<PingMessage, PongMessage>(Bus, InputQueueAddress, TestTimeout);
+            _requestClient = await Host.CreateRequestClient<PingMessage, PongMessage>(InputQueueAddress, TestTimeout);
 
             _response = _requestClient.Request(new PingMessage());
         }
@@ -107,6 +107,21 @@ namespace MassTransit.AzureServiceBusTransport.Tests
             PongMessage message = await _response;
 
             Assert.AreEqual(message.CorrelationId, _ping.Result.Message.CorrelationId);
+        }
+
+        [Test]
+        public async Task Should_be_quick_on_the_subsequent_calls()
+        {
+            await _requestClient.Request(new PingMessage());
+            await _requestClient.Request(new PingMessage());
+            await _requestClient.Request(new PingMessage());
+            await _requestClient.Request(new PingMessage());
+            await _requestClient.Request(new PingMessage());
+            await _requestClient.Request(new PingMessage());
+            await _requestClient.Request(new PingMessage());
+            await _requestClient.Request(new PingMessage());
+            await _requestClient.Request(new PingMessage());
+            await _requestClient.Request(new PingMessage());
         }
     }
 }

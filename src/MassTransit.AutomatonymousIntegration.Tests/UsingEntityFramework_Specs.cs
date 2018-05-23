@@ -24,6 +24,8 @@ namespace MassTransit.AutomatonymousIntegration.Tests
     using Saga;
     using TestFramework;
     using System.Collections.Generic;
+    using Testing;
+
 
     [TestFixture]
     public class When_using_EntityFramework :
@@ -43,8 +45,6 @@ namespace MassTransit.AutomatonymousIntegration.Tests
                 x.Immediate(5);
             });
             configurator.StateMachineSaga(_machine, _repository.Value);
-
-            configurator.TransportConcurrencyLimit = 16;
         }
 
         public When_using_EntityFramework()

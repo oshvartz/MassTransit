@@ -20,6 +20,8 @@ namespace MassTransit.Tests.Serialization
     using MassTransit.Pipeline.Observables;
     using MassTransit.Serialization;
     using MassTransit.Transports.InMemory;
+    using MassTransit.Transports.InMemory.Contexts;
+    using MassTransit.Transports.InMemory.Fabric;
     using Newtonsoft.Json;
     using NUnit.Framework;
     using Shouldly;
@@ -70,10 +72,12 @@ namespace MassTransit.Tests.Serialization
                 Serializer = new EncryptedMessageSerializer(streamProvider);
                 Deserializer = new EncryptedMessageDeserializer(BsonMessageSerializer.Deserializer, streamProvider);
             }
+#if !NETCORE
             else if (_serializerType == typeof(BinaryMessageSerializer)) {
                 Serializer = new BinaryMessageSerializer();
                 Deserializer = new BinaryMessageDeserializer();
             }
+#endif
             else
                 throw new ArgumentException("The serializer type is unknown");
         }

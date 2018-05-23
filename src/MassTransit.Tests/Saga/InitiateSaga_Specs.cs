@@ -17,6 +17,7 @@ namespace MassTransit.Tests.Saga
     using GreenPipes;
     using GreenPipes.Introspection;
     using MassTransit.Saga;
+    using MassTransit.Testing;
     using Messages;
     using NUnit.Framework;
     using Shouldly;
@@ -27,7 +28,7 @@ namespace MassTransit.Tests.Saga
     public class When_an_initiating_message_for_a_saga_arrives :
         InMemoryTestFixture
     {
-        [Test]
+        [Test, Explicit]
         public void Should_return_a_wonderful_breakdown_of_the_guts_inside_it()
         {
             ProbeResult result = Bus.GetProbeResult();

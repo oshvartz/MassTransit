@@ -15,6 +15,7 @@ namespace MassTransit.Tests.Configuration
     using System;
     using System.Collections.Generic;
     using System.Linq;
+    using System.Reflection;
     using System.Threading.Tasks;
     using GreenPipes;
     using GreenPipes.Filters;
@@ -23,10 +24,11 @@ namespace MassTransit.Tests.Configuration
     using GreenPipes.Policies.ExceptionFilters;
     using MassTransit.Topology;
     using MassTransit.Topology.Observers;
+    using MassTransit.Topology.Topologies;
     using MassTransit.Transports.InMemory;
+    using MassTransit.Transports.InMemory.Contexts;
     using NUnit.Framework;
     using SendPipeSpecifications;
-    using TestFramework;
     using Util;
 
 
@@ -62,8 +64,6 @@ namespace MassTransit.Tests.Configuration
             var sendContext = new InMemorySendContext<MyMessage>(new MyMessage());
 
             await pipe.Send(sendContext).ConfigureAwait(false);
-
-            Console.WriteLine(pipe.GetProbeResult().ToJsonString());
         }
 
         [Test]
@@ -87,8 +87,6 @@ namespace MassTransit.Tests.Configuration
             var sendContext = new InMemorySendContext<MyMessage>(new MyMessage());
 
             await pipe.Send(sendContext).ConfigureAwait(false);
-
-            Console.WriteLine(pipe.GetProbeResult().ToJsonString());
         }
 
         [Test]
@@ -118,8 +116,6 @@ namespace MassTransit.Tests.Configuration
             var sendContext = new InMemorySendContext<MyMessage>(new MyMessage());
 
             await pipe.Send(sendContext).ConfigureAwait(false);
-
-            Console.WriteLine(pipe.GetProbeResult().ToJsonString());
         }
 
         [Test]
@@ -155,8 +151,6 @@ namespace MassTransit.Tests.Configuration
             var sendContext = new InMemorySendContext<MyMessage>(new MyMessage());
 
             await pipe.Send(sendContext).ConfigureAwait(false);
-
-            Console.WriteLine(pipe.GetProbeResult().ToJsonString());
         }
 
         [Test]
@@ -191,8 +185,6 @@ namespace MassTransit.Tests.Configuration
             var sendContext = new InMemorySendContext<MyMessage>(new MyMessage());
 
             await pipe.Send(sendContext).ConfigureAwait(false);
-
-            Console.WriteLine(pipe.GetProbeResult().ToJsonString());
         }
 
         static IEnumerable<Type> GetMessageTypes<TMessage>()
@@ -205,7 +197,7 @@ namespace MassTransit.Tests.Configuration
                 yield return baseInterface;
             }
 
-            var baseType = typeof(TMessage).BaseType;
+            var baseType = typeof(TMessage).GetTypeInfo().BaseType;
             while (baseType != null && TypeMetadataCache.IsValidMessageType(baseType))
             {
                 yield return baseType;
@@ -215,7 +207,7 @@ namespace MassTransit.Tests.Configuration
                     yield return baseInterface;
                 }
 
-                baseType = baseType.BaseType;
+                baseType = baseType.GetTypeInfo().BaseType;
             }
         }
 
@@ -226,9 +218,9 @@ namespace MassTransit.Tests.Configuration
                 .Where(TypeMetadataCache.IsValidMessageType)
                 .ToArray();
 
-            if (baseType.BaseType != null && baseType.BaseType != typeof(object))
+            if (baseType.GetTypeInfo().BaseType != null && baseType.GetTypeInfo().BaseType != typeof(object))
                 baseInterfaces = baseInterfaces
-                    .Except(baseType.BaseType.GetInterfaces())
+                    .Except(baseType.GetTypeInfo().BaseType.GetInterfaces())
                     .Except(baseInterfaces.SelectMany(x => x.GetInterfaces()))
                     .ToArray();
 

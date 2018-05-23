@@ -56,6 +56,8 @@ namespace MassTransit.Tests
         }
     }
 
+#if !NETCORE
+
     [TestFixture]
     public class When_a_message_response_fails_to_serialize_properly_and_is_using_the_binary_serializer :
         InMemoryTestFixture
@@ -68,7 +70,7 @@ namespace MassTransit.Tests
         {
         }
 
-        Task<ConsumeContext<PingMessage2>> _handled;
+
         Task<ConsumeContext<ReceiveFault>> _faulted;
 
         [Test]
@@ -104,8 +106,9 @@ namespace MassTransit.Tests
 
             _faulted = Handled<ReceiveFault>(configurator);
         }
-
     }
+
+    #endif
 
     /// <summary>
     /// this requires debugger tricks to make it work

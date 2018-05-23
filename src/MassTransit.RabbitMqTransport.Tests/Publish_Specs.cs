@@ -49,9 +49,9 @@ namespace MassTransit.RabbitMqTransport.Tests
 
             Task<ConsumeContext<A>> _receivedA;
 
-            protected override void ConfigureRabbitMqReceiveEndoint(IRabbitMqReceiveEndpointConfigurator configurator)
+            protected override void ConfigureRabbitMqReceiveEndpoint(IRabbitMqReceiveEndpointConfigurator configurator)
             {
-                base.ConfigureRabbitMqReceiveEndoint(configurator);
+                base.ConfigureRabbitMqReceiveEndpoint(configurator);
 
                 _receivedA = Handled<A>(configurator);
             }
@@ -99,9 +99,9 @@ namespace MassTransit.RabbitMqTransport.Tests
 
             Task<ConsumeContext<A>> _receivedA;
 
-            protected override void ConfigureRabbitMqReceiveEndoint(IRabbitMqReceiveEndpointConfigurator configurator)
+            protected override void ConfigureRabbitMqReceiveEndpoint(IRabbitMqReceiveEndpointConfigurator configurator)
             {
-                base.ConfigureRabbitMqReceiveEndoint(configurator);
+                base.ConfigureRabbitMqReceiveEndpoint(configurator);
 
                 _receivedA = Handled<A>(configurator);
             }
@@ -134,11 +134,89 @@ namespace MassTransit.RabbitMqTransport.Tests
 
             Task<ConsumeContext<A>> _receivedA;
 
-            protected override void ConfigureRabbitMqReceiveEndoint(IRabbitMqReceiveEndpointConfigurator configurator)
+            protected override void ConfigureRabbitMqReceiveEndpoint(IRabbitMqReceiveEndpointConfigurator configurator)
             {
-                base.ConfigureRabbitMqReceiveEndoint(configurator);
+                base.ConfigureRabbitMqReceiveEndpoint(configurator);
 
                 _receivedA = Handled<A>(configurator);
+            }
+        }
+        
+        [TestFixture, Category("SlowAF"), Explicit]
+        public class WhenAMessageIsPublishedToTheEndpointSuccessfully :
+            RabbitMqTestFixture
+        {
+            [Test]
+            public async Task Should_not_increase_channel_count()
+            {
+                var message = new A {Id = Guid.NewGuid()};
+                await Bus.Publish(message);
+
+                ConsumeContext<A> received = await _receivedA;
+
+                Assert.AreEqual(message.Id, received.Message.Id);
+            }
+
+            [Test]
+            public async Task Should_take_time_to_watch_channel_use()
+            {
+                ConsumeContext<A> received = await _receivedA;
+
+                await Task.Delay(15000);
+            }
+
+            Task<ConsumeContext<A>> _receivedA;
+
+            protected override void ConfigureRabbitMqReceiveEndpoint(IRabbitMqReceiveEndpointConfigurator configurator)
+            {
+                base.ConfigureRabbitMqReceiveEndpoint(configurator);
+
+                _receivedA = Handled<A>(configurator);
+            }
+        }
+        
+        [TestFixture, Category("SlowAF"), Explicit]
+        public class WhenAMessageIsPublishedToTheEndpointFaulting :
+            RabbitMqTestFixture
+        {
+            [Test]
+            public async Task Should_not_increase_channel_count()
+            {
+                var message = new A {Id = Guid.NewGuid()};
+                await Bus.Publish(message);
+
+                var received = await _faultA;
+
+                Assert.AreEqual(message.Id, received.Message.Message.Id);
+            }
+
+            [Test]
+            public async Task Should_take_time_to_watch_channel_use()
+            {
+                var received = await _faultA;
+
+                await Task.Delay(15000);
+            }
+
+            Task<ConsumeContext<A>> _receivedA;
+            Task<ConsumeContext<Fault<A>>> _faultA;
+
+            protected override void ConfigureRabbitMqBusHost(IRabbitMqBusFactoryConfigurator configurator, IRabbitMqHost host)
+            {
+                configurator.ReceiveEndpoint(host, "handle-fault", x =>
+                {
+                    _faultA = Handled<Fault<A>>(x);
+                });
+            }
+
+            protected override void ConfigureRabbitMqReceiveEndpoint(IRabbitMqReceiveEndpointConfigurator configurator)
+            {
+                base.ConfigureRabbitMqReceiveEndpoint(configurator);
+
+                _receivedA = Handler<A>(configurator, context =>
+                {
+                    throw new IntentionalTestException();
+                });
             }
         }
 
@@ -178,9 +256,9 @@ namespace MassTransit.RabbitMqTransport.Tests
                 });
             }
 
-            protected override void ConfigureRabbitMqReceiveEndoint(IRabbitMqReceiveEndpointConfigurator configurator)
+            protected override void ConfigureRabbitMqReceiveEndpoint(IRabbitMqReceiveEndpointConfigurator configurator)
             {
-                base.ConfigureRabbitMqReceiveEndoint(configurator);
+                base.ConfigureRabbitMqReceiveEndpoint(configurator);
 
                 _receivedA = Handled<A>(configurator);
             }
@@ -203,15 +281,15 @@ namespace MassTransit.RabbitMqTransport.Tests
 
                 ConsumeContext<GotA> consumeContext = await _receivedGotA;
 
-                consumeContext.SourceAddress.ShouldBe(new Uri("rabbitmq://[::1]/test/input_queue"));
+                consumeContext.SourceAddress.ShouldBe(new Uri("rabbitmq://localhost/test/input_queue"));
             }
 
             Task<ConsumeContext<A>> _receivedA;
             Task<ConsumeContext<GotA>> _receivedGotA;
 
-            protected override void ConfigureRabbitMqReceiveEndoint(IRabbitMqReceiveEndpointConfigurator configurator)
+            protected override void ConfigureRabbitMqReceiveEndpoint(IRabbitMqReceiveEndpointConfigurator configurator)
             {
-                base.ConfigureRabbitMqReceiveEndoint(configurator);
+                base.ConfigureRabbitMqReceiveEndpoint(configurator);
 
                 configurator.PrefetchCount = 16;
 
@@ -250,9 +328,9 @@ namespace MassTransit.RabbitMqTransport.Tests
 
             MultiTestConsumer _consumer;
 
-            protected override void ConfigureRabbitMqReceiveEndoint(IRabbitMqReceiveEndpointConfigurator configurator)
+            protected override void ConfigureRabbitMqReceiveEndpoint(IRabbitMqReceiveEndpointConfigurator configurator)
             {
-                base.ConfigureRabbitMqReceiveEndoint(configurator);
+                base.ConfigureRabbitMqReceiveEndpoint(configurator);
 
                 _consumer = new MultiTestConsumer(TestTimeout);
                 _consumer.Consume<B>();
@@ -300,9 +378,9 @@ namespace MassTransit.RabbitMqTransport.Tests
 
             MultiTestConsumer _consumer;
 
-            protected override void ConfigureRabbitMqReceiveEndoint(IRabbitMqReceiveEndpointConfigurator configurator)
+            protected override void ConfigureRabbitMqReceiveEndpoint(IRabbitMqReceiveEndpointConfigurator configurator)
             {
-                base.ConfigureRabbitMqReceiveEndoint(configurator);
+                base.ConfigureRabbitMqReceiveEndpoint(configurator);
 
                 configurator.UseConcurrencyLimit(1);
 
@@ -320,7 +398,7 @@ namespace MassTransit.RabbitMqTransport.Tests
         }
 
 
-        class A
+        public class A
         {
             public Guid Id { get; set; }
         }
@@ -409,7 +487,7 @@ namespace MassTransit.RabbitMqTransport.Tests
             await InputQueueSendEndpoint.Send<IProxyMe>(new {IntValue, StringValue, CorrelationId = _correlationId});
         }
 
-        protected override void ConfigureRabbitMqReceiveEndoint(IRabbitMqReceiveEndpointConfigurator configurator)
+        protected override void ConfigureRabbitMqReceiveEndpoint(IRabbitMqReceiveEndpointConfigurator configurator)
         {
             _handler = Handled<IProxyMe>(configurator);
         }

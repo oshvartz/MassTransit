@@ -22,6 +22,8 @@ namespace MassTransit.AutomatonymousIntegration.Tests
     using System.Data.Entity;
     using System.Threading.Tasks;
     using TestFramework;
+    using Testing;
+
 
     [TestFixture]
     public class When_using_EntityFrameworkConcurrencyFail :
@@ -36,8 +38,6 @@ namespace MassTransit.AutomatonymousIntegration.Tests
             _machine = new ChoirStateMachine();
 
             configurator.StateMachineSaga(_machine, _repository.Value);
-
-            configurator.TransportConcurrencyLimit = 16;
         }
 
         public When_using_EntityFrameworkConcurrencyFail()
